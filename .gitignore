@@ -1,0 +1,90 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+venv*/
+.venv/
+.venv
+ENV/
+env/
+
+# Environment and secrets
+.env
+.env.*
+.envrc
+local_settings.py
+secrets.json
+credentials.json
+
+# PyInstaller
+#  Usually these files are written by a python script from a template
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.pytest_cache/
+.coverage
+.coverage.*
+.cache
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.installed.cfg
+*.egg
+pip-wheel-metadata/
+
+# C extensions
+*.so
+
+# Database files
+*.sqlite
+*.sqlite3
+*.db
+monitoring.sqlite
+
+# Model weights, large binaries
+*.pt
+*.pth
+*.ckpt
+yolov8n.pt
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IDEs and editors
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# macOS
+.DS_Store
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+
+# Generated static files
+staticfiles/
+
+# Node modules (if any frontend tools are used)
+node_modules/
+
+# Misc
+coverage.xml
+
+# Keep the .gitignore file itself tracked
+!/.gitignore

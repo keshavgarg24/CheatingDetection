@@ -1,0 +1,13 @@
+# Core
+opencv-python==4.10.0.84
+mediapipe==0.10.14
+numpy==1.26.4
+
+# Dashboard
+Flask==3.0.3
+
+# Optional phone detection (YOLOv8).
+# If you enable USE_YOLO in config.py, you'll also need:
+ultralytics==8.3.7
+torch>=2.2.0
+torchvision>=0.17.0
