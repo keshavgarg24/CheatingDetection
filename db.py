@@ -296,3 +296,47 @@ def get_recent_identity_logs(seat_id: str = None, limit: int = 50):
     except sqlite3.Error as e:
         print(f"[Error] Failed to get identity logs: {e}")
         return []
+
+def delete_student(student_id: str) -> bool:
+    """
+    Delete a student and all their data from the monitoring database.
+    
+    This deletes from:
+    - students table
+    - monitoring_status table
+    - violations table (all violations for this student)
+    - identity_logs table (where identified_student_id matches)
+    
+    Args:
+        student_id: Student identifier to delete
+        
+    Returns:
+        bool: True if student was deleted, False if student didn't exist
+    """
+    def _delete(con):
+        # Check if student exists
+        row = con.execute("SELECT student_id, name FROM students WHERE student_id=?", (student_id,)).fetchone()
+        if not row:
+            return False
+        
+        student_name = row[1]
+        
+        # Delete from all tables
+        con.execute("DELETE FROM violations WHERE student_id=?", (student_id,))
+        con.execute("DELETE FROM monitoring_status WHERE student_id=?", (student_id,))
+        con.execute("DELETE FROM students WHERE student_id=?", (student_id,))
+        con.execute("DELETE FROM identity_logs WHERE identified_student_id=?", (student_id,))
+        con.execute("DELETE FROM identity_logs WHERE expected_student_id=?", (student_id,))
+        
+        print(f"[INFO] Deleted {student_name} (ID: {student_id}) from monitoring database")
+        print(f"[INFO] Removed all violations, monitoring status, and identity logs")
+        return True
+    
+    try:
+        result = _execute_with_retry(_delete)
+        if not result:
+            print(f"[INFO] Student {student_id} not found in monitoring database")
+        return result
+    except sqlite3.Error as e:
+        print(f"[Error] Failed to delete student {student_id}: {e}")
+        return False

@@ -19,7 +19,7 @@ from typing import Dict, List, Optional, Tuple, Any
 # Import configurations
 from config import (
     CAMERA_INDEX, FRAME_WIDTH, FRAME_HEIGHT, SHOW_WINDOW,
-    STUDENT_ID, MAX_STRIKES, LOOKING_AWAY_TIMEOUT,
+    MAX_STRIKES, LOOKING_AWAY_TIMEOUT,
     BOUNDARY_MARGIN, SOFT_SCORE_TO_STRIKE, EXAM_VIOLATIONS,
     VIOLATION_COOLDOWNS, USE_YOLO, EYE_GAZE_ENABLED, POSTURE_DETECTION_ENABLED,
     MOTION_DETECTION_ENABLED, WRITING_CONFIDENCE_THRESHOLD, FRAME_QUALITY_THRESHOLD,
@@ -55,7 +55,7 @@ else:
 class ExamSession:
     """Manages exam session state and initialization"""
     
-    def __init__(self, student_id: str):
+    def __init__(self, student_id: str = None):
         self.student_id = student_id
         self.session_start_time = None
         self.session_active = False
@@ -65,30 +65,40 @@ class ExamSession:
         self.current_soft_score = 0
         self.is_debarred = False
         
-    def initialize_fresh_session(self):
-        """Initialize completely fresh exam session"""
-        print("[SESSION] Initializing fresh exam session...")
+    def initialize_with_student(self, student_id: str, student_name: str = None):
+        """Initialize fresh exam session for detected student"""
+        self.student_id = student_id
+        print(f"[SESSION] Initializing fresh exam session for {student_name or student_id}...")
         
         # Database cleanup and initialization
         init_db()
-        ensure_student(self.student_id, name=None, seat_no=None)
+        ensure_student(self.student_id, name=student_name, seat_no=None)
         self._clear_previous_session_data()
         set_strikes(self.student_id, 0)
         
         # Reset session state
         self.session_start_time = time.monotonic()
         self.session_active = True
-        self.recognition_locked = False
-        self.verified_student_name = None
+        self.recognition_locked = True
+        self.verified_student_name = student_name or f"Student_{student_id}"
         self.current_strikes = 0
         self.current_soft_score = 0
         self.is_debarred = False
         
-        print(f"[SESSION] Fresh session initialized for {self.student_id}")
+        print(f"[SESSION] Fresh session initialized for {self.verified_student_name} ({self.student_id})")
         return True
+        
+    def initialize_fresh_session(self):
+        """Initialize session without specific student (legacy method)"""
+        if not self.student_id:
+            print("[SESSION] Waiting for student detection before initializing session...")
+            return False
+        return self.initialize_with_student(self.student_id)
         
     def _clear_previous_session_data(self):
         """Clear all previous session data from database"""
+        if not self.student_id:
+            return
         try:
             with sqlite3.connect("monitoring.sqlite") as conn:
                 cursor = conn.cursor()
@@ -107,7 +117,8 @@ class ExamSession:
         if not self.recognition_locked:
             self.recognition_locked = True
             self.verified_student_name = student_name
-            print(f"[SESSION] Identity locked: {student_name} ({self.student_id})")
+            if self.student_id:
+                print(f"[SESSION] Identity locked: {student_name} ({self.student_id})")
             return True
         return False
 
@@ -116,13 +127,17 @@ class ExamSession:
 class ViolationSystem:
     """Enhanced violation system with instant flagging and proximity zones"""
     
-    def __init__(self, student_id: str):
+    def __init__(self, student_id: str = None):
         self.student_id = student_id
         self.last_violation_time = {}
         self.violation_start_times = {}
         self.current_violation_reasons = []  # Track active violation reasons
         self.instant_flag_triggered = False  # For phone/material detection
         self.proximity_violations = set()  # Track faces too close to student
+        
+    def set_student_id(self, student_id: str):
+        """Set student ID after detection"""
+        self.student_id = student_id
         
     def reset_session(self):
         """Reset for new session"""
@@ -381,7 +396,7 @@ class ViolationSystem:
 class AllInOneDetector:
     """Complete detection system with all modules"""
     
-    def __init__(self, student_id: str):
+    def __init__(self, student_id: str = None):
         self.student_id = student_id
         self.frame_count = 0
         
@@ -399,18 +414,39 @@ class AllInOneDetector:
             except Exception as e:
                 print(f"[WARNING] YOLO failed to load: {e}")
         
-        # Initialize identity monitor if available
+        # Initialize identity monitor if available (without seat assignments - will identify any registered student)
         self.identity_monitor = None
         if IDENTITY_AVAILABLE:
             try:
-                seat_assignments = {student_id: student_id}
+                # Initialize without seat assignments so it can identify any registered student
+                # Seat assignments are optional and only used for verification, not identification
                 self.identity_monitor = IdentityMonitor(
-                    seat_assignments=seat_assignments,
-                    verification_interval=30
+                    seat_assignments=None,  # No seat assignments - identify any registered student
+                    verification_interval=5  # Check more frequently during detection phase
                 )
-                print("[DETECTION] Identity monitor loaded")
+                print("[DETECTION] Identity monitor loaded (will identify any registered student)")
+                
+                # Check if there are registered students
+                try:
+                    from register_students.student_registration import StudentFaceDatabase
+                    face_db = StudentFaceDatabase()
+                    registered_students = face_db.list_registered_students()
+                    if registered_students:
+                        print(f"[DETECTION] Found {len(registered_students)} registered student(s) in database:")
+                        for student in registered_students[:5]:  # Show first 5
+                            print(f"  - {student['name']} (ID: {student['student_id']}, Roll: {student['roll_number']})")
+                        if len(registered_students) > 5:
+                            print(f"  ... and {len(registered_students) - 5} more")
+                    else:
+                        print("[WARNING] No registered students found in database!")
+                        print("[WARNING] Register students using: python register_students/student_registration.py")
+                except Exception as e:
+                    print(f"[WARNING] Could not check registered students: {e}")
+                    
             except Exception as e:
-                print(f"[WARNING] Identity monitor failed: {e}")
+                print(f"[WARNING] Identity monitor failed to initialize: {e}")
+                import traceback
+                traceback.print_exc()
         
         # Motion detection variables
         self.prev_frame = None
@@ -422,7 +458,14 @@ class AllInOneDetector:
         self.last_hand_in_lap = False
         self.wrist_x_history = deque(maxlen=HAND_GESTURE_WINDOW)
         
-        print(f"[DETECTION] All-in-one detector initialized for {student_id}")
+        print(f"[DETECTION] All-in-one detector initialized for {student_id or 'dynamic detection'}")
+    
+    def set_student_id(self, student_id: str):
+        """Set student ID after detection"""
+        self.student_id = student_id
+        # Identity monitor doesn't need reinitialization - it already works without seat assignments
+        if IDENTITY_AVAILABLE and self.identity_monitor:
+            print(f"[DETECTION] Student ID set to {student_id} - identity monitor will continue verification")
     
     def process_frame(self, frame: np.ndarray) -> Dict[str, Any]:
         """Process frame through ALL detection modules simultaneously"""
@@ -431,7 +474,7 @@ class AllInOneDetector:
         h, w = frame.shape[:2]
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
-        # Initialize results
+            # Initialize results
         results = {
             'frame_number': self.frame_count,
             'timestamp': time.time(),
@@ -439,8 +482,10 @@ class AllInOneDetector:
             'face_bbox': None,
             'face_center': None,
             'keypoints': None,
+            'student_id': None,  # Will be set from identity verification
             'student_name': None,
             'student_verified': False,
+            'confidence': 0.0,
             'head_turned': False,
             'looking_down': False,
             'looking_away': False,
@@ -500,16 +545,78 @@ class AllInOneDetector:
                 hand_analysis = self._analyze_hands(hand_landmarks, results.get('face_center'), w, h)
                 results.update(hand_analysis)
         
-        # 3. IDENTITY VERIFICATION
-        if self.identity_monitor and results['faces_detected'] > 0:
+        # 3. IDENTITY VERIFICATION (identify registered students from database)
+        if self.identity_monitor and results['faces_detected'] > 0 and results.get('face_bbox'):
             try:
-                identity_result = self.identity_monitor.verify_student_identity(frame, self.student_id)
-                results.update({
-                    'student_verified': identity_result['status'] == 'verified',
-                    'student_name': identity_result.get('student', {}).get('name')
-                })
+                # Extract face region for better recognition
+                x1, y1, x2, y2 = results['face_bbox']
+                # Add padding around face
+                padding = 20
+                x1 = max(0, x1 - padding)
+                y1 = max(0, y1 - padding)
+                x2 = min(w, x2 + padding)
+                y2 = min(h, y2 + padding)
+                face_region = frame[y1:y2, x1:x2]
+                
+                # Skip if face region is too small
+                if face_region.shape[0] < 50 or face_region.shape[1] < 50:
+                    results['identity_status'] = 'face_too_small'
+                    return results
+                
+                # Pass seat_id - use student_id if available, otherwise use a placeholder
+                # This allows the identity monitor to work without seat assignments
+                seat_id = self.student_id or "DEFAULT_SEAT"
+                
+                # Force fresh verification during detection phase (bypass throttling for first few seconds)
+                # Reset verification if we haven't identified yet
+                if not self.student_id and self.frame_count % 30 == 1:
+                    # Force a fresh check every 30 frames during detection phase
+                    self.identity_monitor.reset_verification()
+                
+                identity_result = self.identity_monitor.verify_student_identity(face_region, seat_id)
+                
+                # Extract student information from identity result
+                status = identity_result.get('status', 'unknown')
+                student_info = identity_result.get('student')
+                throttled = identity_result.get('throttled', False)
+                
+                if student_info and status in ['verified', 'wrong_seat']:
+                    # Student was identified (either verified or wrong seat)
+                    identified_student_id = identity_result.get('identified_student_id') or student_info.get('student_id')
+                    results.update({
+                        'student_verified': status == 'verified',  # Only verified if status is 'verified'
+                        'student_id': identified_student_id,  # Extract student_id properly
+                        'student_name': student_info.get('name'),
+                        'confidence': identity_result.get('confidence', 0.0),
+                        'identity_status': status
+                    })
+                else:
+                    # No student identified yet
+                    results.update({
+                        'student_verified': False,
+                        'student_id': None,
+                        'student_name': None,
+                        'confidence': 0.0,
+                        'identity_status': status
+                    })
+                    # Only log significant identity verification events (not debug frame-by-frame)
+                    if self.frame_count % 180 == 0 and not throttled and status == 'verified':
+                        error = identity_result.get('error', '')
+                        message = identity_result.get('message', '')
+                        # Only log significant events - not debug frame-by-frame
+                        if status == 'unidentified' and self.frame_count % 300 == 0:
+                            if error == 'No students registered':
+                                print(f"[INFO] No registered students found. Register students first.")
+                            elif error == 'No face detected':
+                                pass  # Don't log face detection issues repeatedly
+                        elif status == 'pending':
+                            pass  # Don't log throttled checks
+                        
             except Exception as e:
                 print(f"[ERROR] Identity verification failed: {e}")
+                import traceback
+                traceback.print_exc()
+                results['identity_status'] = 'error'
         
         # 4. OBJECT DETECTION (YOLO) - Only cheating devices
         if self.yolo_model:  
@@ -715,9 +822,7 @@ class AllInOneDetector:
         if results['hand_in_lap'] and not results['hand_near_face']:
             results['writing_detected'] = True
             
-        # DEBUG: Print hand detection every 60 frames
-        if self.frame_count % 60 == 0 and hand_landmarks:
-            print(f"[DEBUG] Hand analysis: near_face={results['hand_near_face']}, in_lap={results['hand_in_lap']}, gestures={results['suspicious_gestures']}, writing={results['writing_detected']}")
+        # Hand analysis - no verbose logging
         
         return results
     
@@ -1102,42 +1207,40 @@ def initialize_camera():
     return None
 
 def main():
-    """Main monitoring function - COMPLETE EXAM MONITORING SYSTEM"""
+    """Main monitoring function - COMPLETE EXAM MONITORING SYSTEM WITH DYNAMIC STUDENT DETECTION"""
     
     print("=" * 60)
     print("COMPLETE EXAM MONITORING SYSTEM - STARTING")
     print("=" * 60)
     
-    # Initialize all systems
-    session = ExamSession(STUDENT_ID)
-    session.initialize_fresh_session()
-    
-    violation_system = ViolationSystem(STUDENT_ID)
-    violation_system.reset_session()
-    
-    detector = AllInOneDetector(STUDENT_ID)
-    ui = CleanUI(FRAME_WIDTH, FRAME_HEIGHT)
-    live_output = LiveOutput()
-    
-    # Initialize camera
+    # Initialize camera first
     cap = initialize_camera()
     if cap is None:
         print("[ERROR] Camera initialization failed")
         return
     
-    print(f"[EXAM] All systems ready for {STUDENT_ID}")
-    print("[EXAM] Waiting for student recognition...")
+    # Initialize systems without specific student ID - will be set after detection
+    session = ExamSession()  # No student ID initially
+    violation_system = ViolationSystem()  # No student ID initially
+    detector = AllInOneDetector()  # No student ID initially
+    ui = CleanUI(FRAME_WIDTH, FRAME_HEIGHT)
+    live_output = LiveOutput()
+    
+    print("[EXAM] Camera and detection systems ready")
+    print("[EXAM] Waiting for student detection and identification...")
     
     try:
-        # Monitoring variables
-        student_recognized = False
-        exam_start_time = time.monotonic()
+        # Student detection phase variables
+        student_detected = False
+        student_id = None
+        student_name = None
+        
+        # Monitoring variables (will be used after student is detected)
+        exam_start_time = None
         last_face_seen_at = time.monotonic()
         absence_start_time = None
         frame_count = 0
         violations_display = deque(maxlen=3)
-        
-        # Continuous violation tracking
         continuous_violations = {}
         
         while True:
@@ -1153,45 +1256,92 @@ def main():
             h, w = frame.shape[:2]
             current_time = time.monotonic()
             
-            # Process frame through ALL detection modules
+            # Process frame through detection modules
             detection_results = detector.process_frame(frame)
             
-            # DEBUG: Print detection results every 30 frames
-            if frame_count % 30 == 0:
-                print(f"[DEBUG] Frame {frame_count}: Faces={detection_results['faces_detected']}, Phone={detection_results['phone_detected']}, Verified={detection_results['student_verified']}")
-                if detection_results['face_bbox']:
-                    print(f"[DEBUG] Face detected at bbox: {detection_results['face_bbox']}")
-            
-            # Check for first student recognition
-            # Allow recognition if face is detected (fallback if identity verification fails)
-            if not student_recognized:
-                if detection_results['student_verified']:
-                    student_recognized = True
-                    student_name = detection_results['student_name']
-                    session.lock_student_identity(student_name)
-                    print(f"[EXAM] Student recognized via face verification: {student_name} ({STUDENT_ID})")
+            # PHASE 1: STUDENT DETECTION AND IDENTIFICATION
+            if not student_detected:
+                # Check if student was identified through face recognition
+                identified_student_id = detection_results.get('student_id')
+                identity_status = detection_results.get('identity_status', 'unknown')
+                
+                if identified_student_id and detection_results.get('student_verified'):
+                    # Student identified and verified through face recognition
+                    student_id = identified_student_id
+                    student_name = detection_results.get('student_name') or f"Student_{student_id}"
+                    confidence = detection_results.get('confidence', 0.0)
+                    student_detected = True
+                    print(f"[EXAM] ✓ Student identified via face recognition: {student_name} ({student_id}) [confidence: {confidence:.2f}]")
+                    
+                elif identified_student_id and identity_status == 'wrong_seat':
+                    # Student identified but wrong seat - still use this student
+                    student_id = identified_student_id
+                    student_name = detection_results.get('student_name') or f"Student_{student_id}"
+                    confidence = detection_results.get('confidence', 0.0)
+                    student_detected = True
+                    print(f"[EXAM] ⚠ Student identified (seat mismatch): {student_name} ({student_id}) [confidence: {confidence:.2f}]")
+                    print(f"[EXAM] Proceeding with monitoring...")
+                    
                 elif detection_results['faces_detected'] > 0:
-                    # Fallback: recognize any face if identity verification is not available
-                    student_recognized = True
-                    student_name = f"Student_{STUDENT_ID}"
-                    session.lock_student_identity(student_name)
-                    print(f"[EXAM] Student recognized via face detection (ID verification unavailable): {student_name} ({STUDENT_ID})")
+                    # Face detected but not identified - provide helpful messages
+                    if frame_count % 90 == 0:  # Print every 90 frames (every ~3 seconds at 30fps)
+                        status_msg = f"Status: {identity_status}"
+                        if IDENTITY_AVAILABLE and detector.identity_monitor:
+                            print(f"[DETECTION] Face detected but not yet identified ({status_msg})")
+                            print(f"[DETECTION] Waiting for face recognition match against registered students...")
+                        else:
+                            print(f"[DETECTION] Face detected but identity verification unavailable")
+                            print(f"[DETECTION] Install face_recognition: pip install face-recognition")
+                    
+                    # Don't auto-generate student ID - wait for proper identification
+                    # Only proceed if no identity system is available
+                    if not IDENTITY_AVAILABLE:
+                        # Fallback: generate ID only if face_recognition is not available
+                        student_id = f"ID_{int(time.time())}"
+                        student_name = f"Student_{student_id}"
+                        student_detected = True
+                        print(f"[EXAM] Face detected (identity verification unavailable): {student_name} ({student_id})")
                 
-                if student_recognized:
+                if student_detected:
+                    # Initialize session with detected student
+                    session.initialize_with_student(student_id, student_name)
+                    violation_system.set_student_id(student_id)
+                    detector.set_student_id(student_id)
+                    exam_start_time = time.monotonic()
                     print("[EXAM] *** MONITORING ACTIVE - STRIKES ENABLED ***")
-            
-            # Update presence tracking
-            if detection_results['faces_detected'] > 0:
-                last_face_seen_at = current_time
-                absence_start_time = None
-            else:
-                if absence_start_time is None and student_recognized:
-                    absence_start_time = current_time
-            
-            # Process violations ONLY if student is recognized
-            if student_recognized:
                 
-                # 2. Cheating device detection (INSTANT FLAG - immediate debar)
+                # Show detection UI during student detection phase
+                if frame_count % 30 == 0:
+                    # Waiting for student detection - only log periodically
+                    if frame_count % 300 == 0:  # Every 10 seconds at 30fps
+                        print(f"[INFO] Waiting for student detection... (Faces: {detection_results['faces_detected']})")
+                
+                # Simple UI during detection phase
+                if detection_results['faces_detected'] > 0:
+                    cv2.putText(frame, "Student detected - initializing...", (50, 50), 
+                              cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                else:
+                    cv2.putText(frame, "Looking for student...", (50, 50), 
+                              cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                
+                if SHOW_WINDOW:
+                    cv2.imshow("Exam Monitor", frame)
+                
+            # PHASE 2: ACTIVE MONITORING (after student is detected and session initialized)
+            else:
+                # Only log significant events (violations, strikes, debarment)
+                
+                # Update presence tracking
+                if detection_results['faces_detected'] > 0:
+                    last_face_seen_at = current_time
+                    absence_start_time = None
+                else:
+                    if absence_start_time is None:
+                        absence_start_time = current_time
+                
+                # Process violations
+                
+                # 1. Cheating device detection (INSTANT FLAG - immediate debar)
                 if detection_results['phone_detected']:
                     detected_devices = detection_results.get('detected_devices', [])
                     device_names = [d.get('class_name', 'device') for d in detected_devices]
@@ -1204,7 +1354,7 @@ def main():
                     print(f"[INSTANT FLAG] Cheating device detected ({device_list}): {result}")
                     break  # Stop monitoring immediately
                 
-                # 3. Face proximity violations (enhanced multiple faces check)
+                # 2. Face proximity violations (enhanced multiple faces check)
                 if detection_results['faces_detected'] > 1 and detection_results['face_bbox']:
                     # Get other faces (exclude the main student face)
                     other_faces = [bbox for bbox in detection_results['all_face_bboxes'] 
@@ -1217,35 +1367,21 @@ def main():
                     for prox_violation in proximity_violations:
                         result = violation_system.process_violation(
                             session, "face_proximity",
-                            f"Other person too close (distance: {prox_violation['distance']:.0f}px)",
-                            "hard"
+                            f"Face proximity violation: {prox_violation}"
                         )
-                        if result['action'] != 'ignored':
-                            print(f"[VIOLATION] Face proximity: {result}")
-                            break
+                        if result['action'] not in ['ignored']:
+                            print(f"[STRIKE] Face proximity: Strike {session.current_strikes}/3")
                 
-                # 4. Enhanced continuous violations with better detection
-                
-                # HEAD TURNED (with angle threshold)
+                # 3. Head pose violations (looking away)
                 head_turn_angle = detection_results.get('head_turn_angle', 0)
-                if detection_results['head_turned'] and head_turn_angle > 30:
-                    if 'head_turned' not in continuous_violations:
-                        continuous_violations['head_turned'] = current_time
-                else:
-                    if 'head_turned' in continuous_violations:
-                        duration = current_time - continuous_violations['head_turned']
-                        if duration >= 2.5:  # 2.5 seconds threshold
-                            result = violation_system.process_violation(
-                                session, "head_turned",
-                                f"Head turned {head_turn_angle:.1f}° for {duration:.1f}s"
-                            )
-                            if result['action'] not in ['ignored']:
-                                print(f"[STRIKE] Head turned violation: Strike {session.current_strikes}/3")
-                        del continuous_violations['head_turned']
-                
-                # ENHANCED LOOKING AWAY (real eye tracking)
                 gaze_deviation = detection_results.get('gaze_deviation_score', 0)
-                looking_away = detection_results['looking_away'] or gaze_deviation > 0.45
+                
+                looking_away = (
+                    detection_results['head_turned'] or 
+                    detection_results['looking_away'] or
+                    head_turn_angle > 45
+                )
+                
                 if looking_away:
                     if 'looking_away' not in continuous_violations:
                         continuous_violations['looking_away'] = current_time
@@ -1261,7 +1397,7 @@ def main():
                                 print(f"[STRIKE] Looking away violation: Strike {session.current_strikes}/3")
                         del continuous_violations['looking_away']
                 
-                # TALKING/COLLABORATION DETECTION
+                # 4. Talking/collaboration detection
                 talking_indicators = [
                     detection_results.get('faces_detected', 0) > 1,  # Other person present
                     detection_results['head_turned'],                # Head turned toward person
@@ -1284,7 +1420,7 @@ def main():
                     if 'talking_attempt' in continuous_violations:
                         del continuous_violations['talking_attempt']
                 
-                # Looking down (keep existing with longer threshold)
+                # 5. Looking down violations
                 if detection_results['looking_down']:
                     if 'looking_down' not in continuous_violations:
                         violation_system.start_continuous_violation('looking_down')
@@ -1296,7 +1432,7 @@ def main():
                         if result and result['action'] not in ['ignored']:
                             print(f"[STRIKE] Extended looking down: Strike {session.current_strikes}/3")
                 
-                # 5. Hand violations (soft violations)
+                # 6. Hand violations (soft violations)
                 if detector.hand_events >= HAND_EVENT_REPEAT and not detection_results['writing_detected']:
                     result = violation_system.process_violation(
                         session, "hand_suspicious", 
@@ -1306,7 +1442,7 @@ def main():
                         print(f"[SOFT] Hand behavior: {session.current_soft_score}/3 soft violations")
                         detector.hand_events = 0  # Reset counter
                 
-                # 6. Motion violations
+                # 7. Motion violations
                 if detection_results['excessive_motion']:
                     result = violation_system.process_violation(
                         session, "excessive_motion", 
@@ -1315,7 +1451,7 @@ def main():
                     if result['action'] not in ['ignored']:
                         print(f"[SOFT] Excessive motion: {session.current_soft_score}/3 soft violations")
                 
-                # 7. Posture violations
+                # 8. Posture violations
                 for posture_violation in detection_results.get('posture_violations', []):
                     result = violation_system.process_violation(
                         session, f"posture_{posture_violation['type']}", 
@@ -1332,49 +1468,54 @@ def main():
                         'severity': 'critical' if session.current_strikes >= 2 else 'warning',
                         'timestamp': current_time
                     })
-            
-            # Calculate elapsed time
-            elapsed_time = current_time - exam_start_time
-            
-            # Combine violation display with violation system reasons
-            all_violations = list(violations_display) + violation_system.current_violation_reasons
-            
-            # Draw complete clean UI
-            display_frame = ui.draw_interface(
-                frame.copy(), session, detection_results, 
-                elapsed_time, all_violations
-            )
-            
-            # Generate live output
-            live_output.generate_output(session, detection_results, elapsed_time)
-            
-            # Show frame
-            if SHOW_WINDOW:
-                cv2.imshow("COMPLETE EXAM MONITORING SYSTEM (q=quit)", display_frame)
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
-            
-            # Check if student is debarred
-            if session.is_debarred:
-                print("\n" + "=" * 60)
-                print("*** STUDENT DEBARRED - EXAM TERMINATED ***")
-                print("=" * 60)
                 
-                # Show debarred message
-                cv2.putText(display_frame, "STUDENT DEBARRED - EXAM TERMINATED", 
-                           (50, FRAME_HEIGHT//2), cv2.FONT_HERSHEY_SIMPLEX, 
-                           1.2, (0, 0, 255), 3, cv2.LINE_AA)
+                # Calculate elapsed time for active monitoring
+                elapsed_time = current_time - exam_start_time
                 
+                # Combine violation display with violation system reasons
+                all_violations = list(violations_display) + violation_system.current_violation_reasons
+                
+                # Draw complete clean UI
+                display_frame = ui.draw_interface(
+                    frame.copy(), session, detection_results, 
+                    elapsed_time, all_violations
+                )
+                
+                # Generate live output
+                live_output.generate_output(session, detection_results, elapsed_time)
+                
+                # Show frame with monitoring UI
                 if SHOW_WINDOW:
                     cv2.imshow("COMPLETE EXAM MONITORING SYSTEM (q=quit)", display_frame)
-                    cv2.waitKey(5000)  # Show for 5 seconds
-                break
+                
+                # Check if student is debarred
+                if session.is_debarred:
+                    print("\n" + "=" * 60)
+                    print("*** STUDENT DEBARRED - EXAM TERMINATED ***")
+                    print("=" * 60)
+                    
+                    # Show debarred message
+                    cv2.putText(display_frame, "STUDENT DEBARRED - EXAM TERMINATED", 
+                               (50, FRAME_HEIGHT//2), cv2.FONT_HERSHEY_SIMPLEX, 
+                               1.2, (0, 0, 255), 3, cv2.LINE_AA)
+                    
+                    if SHOW_WINDOW:
+                        cv2.imshow("COMPLETE EXAM MONITORING SYSTEM (q=quit)", display_frame)
+                        cv2.waitKey(5000)  # Show for 5 seconds
+                    break
             
             # Performance info (every 150 frames - reduced logging)
             if frame_count % 150 == 0:
                 frame_time = (time.perf_counter() - frame_start) * 1000
                 fps = 1000 / frame_time if frame_time > 0 else 0
-                print(f"[PERFORMANCE] Frame {frame_count}: {fps:.1f} FPS")
+                # Performance logging - only periodically
+                if frame_count % 600 == 0:  # Every 20 seconds at 30fps
+                    print(f"[INFO] Performance: {fps:.1f} FPS")
+            
+            # Check for quit key
+            if SHOW_WINDOW:
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
     
     except Exception as e:
         print(f"[ERROR] Monitoring failed: {e}")
@@ -1391,15 +1532,18 @@ def main():
         print("\n" + "=" * 60)
         print("EXAM SESSION SUMMARY")
         print("=" * 60)
-        student_name = session.verified_student_name if session.verified_student_name else "Not recognized"
-        print(f"Student: {student_name} ({session.student_id})")
-        final_status = 'DEBARRED' if session.is_debarred else 'COMPLETED'
-        if session.is_debarred and violation_system.instant_flag_triggered:
-            final_status = 'FLAGGED (Instant)'
-        print(f"Final Status: {final_status}")
-        print(f"Final Strikes: {session.current_strikes}/3")
-        print(f"Final Soft Score: {session.current_soft_score}/3")
-        print(f"Session Duration: {time.monotonic() - exam_start_time:.1f} seconds")
+        if student_detected and session.student_id:
+            student_name = session.verified_student_name if session.verified_student_name else "Not recognized"
+            print(f"Student: {student_name} ({session.student_id})")
+            final_status = 'DEBARRED' if session.is_debarred else 'COMPLETED'
+            if session.is_debarred and violation_system.instant_flag_triggered:
+                final_status = 'FLAGGED (Instant)'
+            print(f"Final Status: {final_status}")
+            print(f"Final Strikes: {session.current_strikes}/3")
+            print(f"Final Soft Score: {session.current_soft_score}/3")
+        else:
+            print("Student: Not detected")
+            print("Final Status: NO STUDENT DETECTED")
         print("=" * 60)
 
 if __name__ == "__main__":

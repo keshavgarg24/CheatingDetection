@@ -344,6 +344,80 @@ class StudentFaceDatabase:
         
         conn.close()
         return students
+    
+    def delete_student(self, student_id: str) -> bool:
+        """
+        Delete a student from the face database.
+        
+        Args:
+            student_id: Unique student identifier to delete
+            
+        Returns:
+            bool: True if student was deleted, False if student didn't exist
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Check if student exists
+            cursor.execute("SELECT student_id, name FROM students WHERE student_id = ?", (student_id,))
+            student = cursor.fetchone()
+            
+            if not student:
+                conn.close()
+                return False
+            
+            student_name = student[1]
+            
+            # Delete student from face database
+            cursor.execute("DELETE FROM students WHERE student_id = ?", (student_id,))
+            
+            conn.commit()
+            conn.close()
+            
+            print(f"[SUCCESS] Student {student_name} (ID: {student_id}) deleted from face database")
+            return True
+            
+        except sqlite3.Error as e:
+            print(f"[ERROR] Database error while deleting student: {e}")
+            return False
+    
+    def get_student(self, student_id: str):
+        """
+        Get a specific student's information.
+        
+        Args:
+            student_id: Unique student identifier
+            
+        Returns:
+            dict or None: Student information if found, None otherwise
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT student_id, name, roll_number, seat_number, created_at 
+                FROM students 
+                WHERE student_id = ?
+            """, (student_id,))
+            
+            row = cursor.fetchone()
+            conn.close()
+            
+            if row:
+                return {
+                    'student_id': row[0],
+                    'name': row[1],
+                    'roll_number': row[2],
+                    'seat_number': row[3],
+                    'created_at': row[4]
+                }
+            return None
+            
+        except sqlite3.Error as e:
+            print(f"[ERROR] Database error while getting student: {e}")
+            return None
 
 
 # Example usage

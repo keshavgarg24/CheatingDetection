@@ -13,7 +13,8 @@ import base64
 import cv2
 import time
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import json
 from collections import defaultdict
 import threading
 
@@ -51,14 +52,13 @@ class DashboardBackend:
     
     def get_enhanced_status(self):
         """
-        Get enhanced student status with identity info and photos.
+        Get enhanced status for currently active student only.
         
-        Optimized with batched queries and 1-second cache.
-        Joins monitoring_status with students table from both databases,
-        includes student photos as base64, and recent violation counts.
+        Returns the student that is currently being monitored (has recent last_update).
+        Returns None if no student is currently being monitored.
         
         Returns:
-            list: List of dicts containing enhanced student status
+            dict or None: Current student status if monitoring, None otherwise
         """
         # Check cache (1 second TTL for performance)
         now = time.time()
@@ -71,135 +71,147 @@ class DashboardBackend:
             mon_conn.row_factory = sqlite3.Row
             mon_cur = mon_conn.cursor()
             
-            # Optimized: Get monitoring status with JOIN (single query instead of multiple)
+            # Get the most recently updated student (currently being monitored)
+            # Only consider updates within last 5 minutes (300 seconds)
             mon_cur.execute("""
                 SELECT ms.student_id, ms.strikes, ms.status, ms.last_update,
                        s.name, s.seat_no
                 FROM monitoring_status ms
                 LEFT JOIN students s ON ms.student_id = s.student_id
-                ORDER BY s.seat_no
+                WHERE datetime(ms.last_update) > datetime('now', '-5 minutes')
+                ORDER BY ms.last_update DESC
+                LIMIT 1
             """)
             
-            status_rows = mon_cur.fetchall()
+            row = mon_cur.fetchone()
             
-            # Optimized: Get recent violation counts per student (uses index on ts and student_id)
-            violation_counts = {}
+            # If no active monitoring, return None
+            if not row:
+                mon_conn.close()
+                self.status_cache = None
+                self.status_cache_time = now
+                return None
+            
+            student_id = row['student_id']
+            
+            # Get recent violation count for this student
             mon_cur.execute("""
-                SELECT student_id, COUNT(*) as count
+                SELECT COUNT(*) as count
                 FROM violations
-                WHERE ts > datetime('now', '-1 hour')
-                GROUP BY student_id
-            """)
-            for row in mon_cur.fetchall():
-                violation_counts[row[0]] = row[1]
+                WHERE student_id = ? AND ts > datetime('now', '-1 hour')
+            """, (student_id,))
+            violation_count_row = mon_cur.fetchone()
+            violation_count = violation_count_row[0] if violation_count_row else 0
             
             mon_conn.close()
             
-            # Connect to faces database
+            # Connect to faces database to get photo and roll number
             try:
                 faces_conn = sqlite3.connect(self.faces_db)
                 faces_conn.row_factory = sqlite3.Row
                 faces_cur = faces_conn.cursor()
                 
-                # Get student photos and additional info
                 faces_cur.execute("""
-                    SELECT student_id, roll_number, registration_photo
+                    SELECT roll_number, registration_photo
                     FROM students
-                """)
+                    WHERE student_id = ?
+                """, (student_id,))
                 
-                student_photos = {}
-                student_rolls = {}
-                for row in faces_cur.fetchall():
-                    student_id = row['student_id']
-                    student_rolls[student_id] = row['roll_number']
-                    
-                    # Convert photo BLOB to base64
-                    if row['registration_photo']:
-                        photo_base64 = base64.b64encode(row['registration_photo']).decode('utf-8')
-                        student_photos[student_id] = f"data:image/jpeg;base64,{photo_base64}"
-                    else:
-                        student_photos[student_id] = None
+                face_row = faces_cur.fetchone()
+                roll_number = face_row['roll_number'] if face_row else None
+                photo_blob = face_row['registration_photo'] if face_row else None
+                
+                # Convert photo BLOB to base64
+                photo = None
+                if photo_blob:
+                    photo_base64 = base64.b64encode(photo_blob).decode('utf-8')
+                    photo = f"data:image/jpeg;base64,{photo_base64}"
                 
                 faces_conn.close()
             except sqlite3.Error as e:
                 print(f"[WARNING] Could not access faces database: {e}")
-                student_photos = {}
-                student_rolls = {}
+                roll_number = None
+                photo = None
             
-            # Build enhanced status response
-            enhanced_status = []
-            for row in status_rows:
-                student_id = row['student_id']
-                
-                status_dict = {
-                    'student_id': student_id,
-                    'name': row['name'] or 'Unknown',
-                    'roll_number': student_rolls.get(student_id, 'N/A'),
-                    'seat_number': row['seat_no'] or 'N/A',
-                    'strikes': row['strikes'],
-                    'status': row['status'],
-                    'last_update': row['last_update'],
-                    'photo': student_photos.get(student_id),
-                    'recent_violations': violation_counts.get(student_id, 0)
-                }
-                
-                enhanced_status.append(status_dict)
+            # Build status response
+            status_dict = {
+                'student_id': student_id,
+                'name': row['name'] or 'Unknown',
+                'roll_number': roll_number or 'N/A',
+                'seat_number': row['seat_no'] or 'N/A',
+                'strikes': row['strikes'],
+                'status': row['status'],
+                'last_update': row['last_update'],
+                'photo': photo,
+                'recent_violations': violation_count
+            }
             
             # Update cache
-            self.status_cache = enhanced_status
+            self.status_cache = status_dict
             self.status_cache_time = now
             
-            return enhanced_status
+            return status_dict
             
         except sqlite3.Error as e:
             print(f"[ERROR] Database error in get_enhanced_status: {e}")
-            return []
+            return None
     
-    def get_violation_analytics(self):
+    def get_violation_analytics(self, student_id=None):
         """
-        Get violation analytics with type distribution and timeline.
+        Get violation analytics for current student only.
         
-        Optimized with batched queries and 5-second cache.
-        Calculates:
-        - Violation distribution by type (last 1 hour)
-        - Violation timeline (last 2 hours, 1-minute granularity)
-        - Risk distribution (high/medium/low/none based on strikes)
+        Returns violation distribution and timeline for the active student.
+        Returns empty analytics if no student is being monitored.
+        
+        Args:
+            student_id: Student ID to get analytics for (if None, uses current active student)
         
         Returns:
-            dict: Analytics data with type_distribution, timeline, risk_distribution
+            dict: Analytics data with type_distribution and timeline
         """
+        # If no student_id provided, get current active student
+        if not student_id:
+            current_status = self.get_enhanced_status()
+            if not current_status:
+                return {
+                    'type_distribution': {},
+                    'timeline': []
+                }
+            student_id = current_status['student_id']
+        
         # Check cache (5 second TTL for performance)
         now = time.time()
-        if self.analytics_cache and self.analytics_cache_time and (now - self.analytics_cache_time) < 5.0:
+        cache_key = f"{student_id}_{now // 5}"  # Cache key changes every 5 seconds
+        if self.analytics_cache and hasattr(self, 'analytics_cache_key') and self.analytics_cache_key == cache_key:
             return self.analytics_cache
         
         try:
             conn = sqlite3.connect(self.monitoring_db)
             cur = conn.cursor()
             
-            # 1. Violation type distribution (last 1 hour)
+            # Violation type distribution for this student (last 1 hour)
             cur.execute("""
                 SELECT violation_type, COUNT(*) as count
                 FROM violations
-                WHERE ts > datetime('now', '-1 hour')
+                WHERE student_id = ? AND ts > datetime('now', '-1 hour')
                 GROUP BY violation_type
                 ORDER BY count DESC
-            """)
+            """, (student_id,))
             
             type_distribution = {}
             for row in cur.fetchall():
                 type_distribution[row[0]] = row[1]
             
-            # 2. Violation timeline (last 2 hours, 1-minute buckets)
+            # Violation timeline for this student (last 2 hours, 1-minute buckets)
             cur.execute("""
                 SELECT 
                     strftime('%Y-%m-%d %H:%M', ts) as minute,
                     COUNT(*) as count
                 FROM violations
-                WHERE ts > datetime('now', '-2 hours')
+                WHERE student_id = ? AND ts > datetime('now', '-2 hours')
                 GROUP BY minute
                 ORDER BY minute
-            """)
+            """, (student_id,))
             
             timeline = []
             for row in cur.fetchall():
@@ -208,39 +220,16 @@ class DashboardBackend:
                     'count': row[1]
                 })
             
-            # 3. Risk distribution (based on current strikes)
-            cur.execute("""
-                SELECT strikes FROM monitoring_status
-            """)
-            
-            risk_distribution = {
-                'high': 0,    # strikes >= 3
-                'medium': 0,  # strikes >= 2
-                'low': 0,     # strikes >= 1
-                'none': 0     # strikes = 0
-            }
-            
-            for row in cur.fetchall():
-                strikes = row[0]
-                if strikes >= 3:
-                    risk_distribution['high'] += 1
-                elif strikes >= 2:
-                    risk_distribution['medium'] += 1
-                elif strikes >= 1:
-                    risk_distribution['low'] += 1
-                else:
-                    risk_distribution['none'] += 1
-            
             conn.close()
             
             analytics = {
                 'type_distribution': type_distribution,
-                'timeline': timeline,
-                'risk_distribution': risk_distribution
+                'timeline': timeline
             }
             
             # Update cache
             self.analytics_cache = analytics
+            self.analytics_cache_key = cache_key
             self.analytics_cache_time = now
             
             return analytics
@@ -249,8 +238,7 @@ class DashboardBackend:
             print(f"[ERROR] Database error in get_violation_analytics: {e}")
             return {
                 'type_distribution': {},
-                'timeline': [],
-                'risk_distribution': {'high': 0, 'medium': 0, 'low': 0, 'none': 0}
+                'timeline': []
             }
 
 
@@ -289,36 +277,77 @@ def api_analytics():
     return jsonify(analytics)
 
 
+@app.route('/api/live-status')
+def api_live_status():
+    """Get real-time live monitoring status from live_monitoring.json."""
+    try:
+        live_json_path = Path(__file__).resolve().parents[1] / 'live_monitoring.json'
+        
+        if not live_json_path.exists():
+            return jsonify({
+                'error': 'Live monitoring data not available',
+                'active': False
+            })
+        
+        with open(live_json_path, 'r') as f:
+            live_data = json.load(f)
+        
+        # Check if data is recent (within last 10 seconds)
+        if 'timestamp' in live_data:
+            try:
+                timestamp = datetime.fromisoformat(live_data['timestamp'].replace('Z', '+00:00'))
+                time_diff = (datetime.now(timezone.utc) - timestamp.replace(tzinfo=timezone.utc)).total_seconds()
+                live_data['active'] = time_diff < 10
+                live_data['last_update_ago'] = f"{int(time_diff)}s ago"
+            except:
+                live_data['active'] = True
+        else:
+            live_data['active'] = True
+        
+        return jsonify(live_data)
+        
+    except Exception as e:
+        print(f"[ERROR] Failed to read live monitoring data: {e}")
+        return jsonify({
+            'error': str(e),
+            'active': False
+        })
+
+
 @app.route('/api/violations')
 def api_violations():
-    """Get recent violations with optimized query."""
+    """Get recent violations for current student only."""
     try:
         limit = request.args.get('limit', 20, type=int)
+        
+        # Get current active student
+        current_status = dashboard_backend.get_enhanced_status()
+        if not current_status:
+            return jsonify([])  # No active monitoring
+        
+        student_id = current_status['student_id']
         
         conn = sqlite3.connect(dashboard_backend.monitoring_db)
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         
-        # Optimized: Single JOIN query instead of multiple lookups
-        # Uses index on violations.id for fast DESC ordering
+        # Get violations for this student only
         cur.execute("""
-            SELECT v.student_id, v.violation_type, v.detail, v.ts, s.name
+            SELECT v.violation_type, v.detail, v.ts
             FROM violations v
-            LEFT JOIN students s ON v.student_id = s.student_id
+            WHERE v.student_id = ?
             ORDER BY v.id DESC
             LIMIT ?
-        """, (limit,))
+        """, (student_id, limit,))
         
-        # Batch process all rows at once
+        # Build violations list
         violations = []
         for row in cur.fetchall():
             violations.append({
-                'student_id': row['student_id'],
-                'student_name': row['name'] or 'Unknown',
                 'type': row['violation_type'],
                 'detail': row['detail'],
                 'ts': row['ts'],
-                'severity': 'high' if 'phone' in row['violation_type'].lower() else 'medium'
+                'severity': 'high' if 'phone' in row['violation_type'].lower() or 'debarred' in row['violation_type'].lower() else 'medium'
             })
         
         conn.close()

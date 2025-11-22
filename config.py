@@ -42,7 +42,7 @@ FRAME_HEIGHT = 720
 SHOW_WINDOW = True            # Show OpenCV window for demo
 
 # ==== Monitoring scope ====
-STUDENT_ID = "222"             # Seat/student identifier for this camera (matches registered student)
+# STUDENT_ID removed - now dynamically detected
 ALLOWED_FACES_PER_BENCH = 1   # Only 1 face allowed in exam mode
 EXAM_ROOM_ID = "ROOM_A"       # Exam room identifier
 STRICT_MONITORING = True      # Enable strict monitoring for exams

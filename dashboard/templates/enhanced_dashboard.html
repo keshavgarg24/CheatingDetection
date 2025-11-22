@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Enhanced Exam Monitoring Dashboard</title>
+    <title>Exam Monitoring Dashboard</title>
     
     <!-- Bootstrap 5 CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -17,23 +17,18 @@
     <!-- Custom Styles -->
     <link rel="stylesheet" href="/static/enhanced_styles.css">
 </head>
-<body class="bg-dark text-light">
+<body>
     
     <!-- Navigation Bar -->
-    <nav class="navbar navbar-dark bg-darker">
+    <nav class="navbar navbar-dark bg-dark border-bottom">
         <div class="container-fluid">
-            <span class="navbar-brand mb-0 h1">
-                <i class="bi bi-camera-video"></i> Exam Monitoring System
-            </span>
-            <div class="d-flex align-items-center">
-                <span class="me-4">
-                    <strong>Exam Timer:</strong> 
-                    <span id="exam-timer" class="badge bg-primary fs-6">00:00:00</span>
-                </span>
+            <span class="navbar-brand mb-0 h5">AutoInvigilator</span>
+            <div class="d-flex align-items-center gap-3">
                 <span>
-                    <strong>Status:</strong> 
-                    <span id="connection-status" class="badge bg-success">Active</span>
+                    <strong>Timer:</strong> 
+                    <span id="exam-timer" class="timer">00:00:00</span>
                 </span>
+                <span id="connection-status" class="status-badge">Active</span>
             </div>
         </div>
     </nav>
@@ -41,138 +36,187 @@
     <!-- Alert Container -->
     <div id="alert-container" class="alert-container"></div>
 
-    <div class="container-fluid mt-3">
-        <div class="row">
+    <div class="container-fluid mt-4">
+        
+        <!-- No Active Monitoring Message -->
+        <div id="no-monitoring-message" class="text-center py-5" style="display: none;">
+            <div class="empty-state">
+                <h4 class="text-muted mb-3">No Active Monitoring</h4>
+                <p class="text-muted">Waiting for student detection and identification...</p>
+            </div>
+        </div>
+
+        <!-- Active Monitoring Content -->
+        <div id="monitoring-content" style="display: none;">
             
-            <!-- Left Column: Camera Feed and Quick Stats -->
-            <div class="col-lg-4">
+            <div class="row">
                 
-                <!-- Live Camera Feed Card -->
-                <div class="card bg-secondary text-light mb-3">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">Live Camera Feed</h5>
-                        <button id="toggle-camera-btn" class="btn btn-sm btn-primary">Start Feed</button>
+                <!-- Left Column: Student Info and Camera -->
+                <div class="col-lg-4 mb-4">
+                    
+                    <!-- Student Info Card -->
+                    <div class="card mb-3">
+                        <div class="card-body text-center">
+                            <div id="student-photo-container" class="mb-3">
+                                <img id="student-photo" src="" alt="Student Photo" class="student-photo-large">
+                            </div>
+                            <h5 id="student-name" class="card-title mb-2"></h5>
+                            <div class="student-details mb-3">
+                                <div class="detail-item">
+                                    <span class="detail-label">Roll:</span>
+                                    <span id="student-roll" class="detail-value"></span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">Seat:</span>
+                                    <span id="student-seat" class="detail-value"></span>
+                                </div>
+                                <div class="detail-item">
+                                    <span class="detail-label">ID:</span>
+                                    <span id="student-id" class="detail-value"></span>
+                                </div>
+                            </div>
+                            <div class="status-indicator mb-3">
+                                <span id="status-badge" class="badge"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Camera Feed Card -->
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h6 class="mb-0">Camera Feed</h6>
+                            <button id="toggle-camera-btn" class="btn btn-sm">Start</button>
                     </div>
                     <div class="card-body text-center">
                         <div id="camera-feed-container">
-                            <img id="camera-feed" src="" alt="Camera Feed" class="img-fluid" style="max-height: 300px; display: none;">
+                                <img id="camera-feed" src="" alt="Camera Feed" style="max-width: 100%; display: none; border-radius: 4px;">
                             <div id="camera-placeholder" class="camera-placeholder">
-                                <p class="text-muted">Camera feed inactive</p>
+                                    <p class="text-muted mb-0">Camera inactive</p>
+                                </div>
                             </div>
                         </div>
                     </div>
+
                 </div>
 
-                <!-- Quick Stats Cards (2x2 Grid) -->
-                <div class="row g-2">
-                    <div class="col-6">
-                        <div class="card bg-success text-white">
-                            <div class="card-body text-center">
-                                <h6 class="card-title">Normal</h6>
-                                <h2 id="stat-normal" class="mb-0">0</h2>
+                <!-- Right Column: Violations and Stats -->
+                <div class="col-lg-8 mb-4">
+                    
+                    <!-- Real-time Monitoring Status -->
+                    <div class="row mb-3">
+                        <div class="col-md-12 mb-3">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h6 class="mb-0">Real-Time Monitoring Status</h6>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row g-3">
+                                        <div class="col-md-3">
+                                            <div class="status-item">
+                                                <span class="status-label">Student Present:</span>
+                                                <span id="live-student-present" class="status-value">-</span>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <div class="status-item">
+                                                <span class="status-label">Eye Gaze:</span>
+                                                <span id="live-eye-gaze" class="status-value">-</span>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <div class="status-item">
+                                                <span class="status-label">Head Pose:</span>
+                                                <span id="live-head-pose" class="status-value">-</span>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <div class="status-item">
+                                                <span class="status-label">Motion Status:</span>
+                                                <span id="live-motion" class="status-value">-</span>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <div class="status-item">
+                                                <span class="status-label">Object Detected:</span>
+                                                <span id="live-object" class="status-value">-</span>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <div class="status-item">
+                                                <span class="status-label">Boundary Violation:</span>
+                                                <span id="live-boundary" class="status-value">-</span>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <div class="status-item">
+                                                <span class="status-label">Strikes:</span>
+                                                <span id="stat-strikes" class="stat-value">0</span>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <div class="status-item">
+                                                <span class="status-label">Soft Score:</span>
+                                                <span id="stat-soft-score" class="stat-value">0</span>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-12">
+                                            <div class="status-item">
+                                                <span class="status-label">Decision:</span>
+                                                <span id="live-decision" class="status-value-badge">-</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
-                    <div class="col-6">
-                        <div class="card bg-warning text-dark">
-                            <div class="card-body text-center">
-                                <h6 class="card-title">Warning</h6>
-                                <h2 id="stat-warning" class="mb-0">0</h2>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-6">
-                        <div class="card bg-danger text-white">
-                            <div class="card-body text-center">
-                                <h6 class="card-title">Flagged</h6>
-                                <h2 id="stat-flagged" class="mb-0">0</h2>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-6">
-                        <div class="card bg-info text-white">
-                            <div class="card-body text-center">
-                                <h6 class="card-title">Total Violations</h6>
-                                <h2 id="stat-violations" class="mb-0">0</h2>
-                            </div>
-                        </div>
-                    </div>
-                </div>
 
-            </div>
+                    <!-- Stats Row -->
+                    <div class="row mb-3">
+                        <div class="col-md-4 mb-3">
+                            <div class="stat-card">
+                                <div class="stat-label">Recent Violations</div>
+                                <div id="stat-violations" class="stat-value">0</div>
+                            </div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <div class="stat-card">
+                                <div class="stat-label">Violation Types</div>
+                                <div id="stat-types" class="stat-value">0</div>
+                            </div>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <div class="stat-card">
+                                <div class="stat-label">Last Update</div>
+                                <div id="stat-last-update" class="stat-value-small"></div>
+                            </div>
+                        </div>
+                    </div>
 
-            <!-- Middle Column: Student Status Table -->
-            <div class="col-lg-8">
-                
-                <!-- Student Status Table -->
-                <div class="card bg-secondary text-light mb-3">
+                    <!-- Violation Timeline Chart -->
+                    <div class="card mb-3">
                     <div class="card-header">
-                        <h5 class="mb-0">Student Status</h5>
+                            <h6 class="mb-0">Violation Timeline</h6>
                     </div>
                     <div class="card-body">
-                        <div class="table-responsive">
-                            <table class="table table-dark table-hover">
-                                <thead>
-                                    <tr>
-                                        <th>Photo</th>
-                                        <th>Name</th>
-                                        <th>Roll</th>
-                                        <th>Seat</th>
-                                        <th>Status</th>
-                                        <th>Strikes</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="student-status-tbody">
-                                    <tr>
-                                        <td colspan="7" class="text-center text-muted">Loading student data...</td>
-                                    </tr>
-                                </tbody>
-                            </table>
+                            <canvas id="violation-timeline-chart"></canvas>
                         </div>
                     </div>
-                </div>
 
-            </div>
-
-        </div>
-
-        <div class="row mt-3">
-            
-            <!-- Analytics Panel -->
-            <div class="col-lg-6">
-                <div class="card bg-secondary text-light mb-3">
-                    <div class="card-header">
-                        <h5 class="mb-0">Violation Analytics</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="row">
-                            <div class="col-md-6">
-                                <h6 class="text-center">Violation Types</h6>
-                                <canvas id="violation-types-chart"></canvas>
+                    <!-- Recent Violations Table -->
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h6 class="mb-0">Recent Violations</h6>
+                            <div class="btn-group btn-group-sm">
+                                <button class="btn btn-sm" onclick="dashboard.resetStrikes()">Reset Strikes</button>
                             </div>
-                            <div class="col-md-6">
-                                <h6 class="text-center">Violation Timeline</h6>
-                                <canvas id="violation-timeline-chart"></canvas>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Recent Violations Table -->
-            <div class="col-lg-6">
-                <div class="card bg-secondary text-light mb-3">
-                    <div class="card-header">
-                        <h5 class="mb-0">Recent Violations</h5>
                     </div>
                     <div class="card-body">
                         <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
-                            <table class="table table-dark table-sm">
+                                <table class="table table-sm">
                                 <thead>
                                     <tr>
                                         <th>Time</th>
-                                        <th>Student</th>
                                         <th>Type</th>
                                         <th>Detail</th>
                                         <th>Severity</th>
@@ -180,16 +224,20 @@
                                 </thead>
                                 <tbody id="recent-violations-tbody">
                                     <tr>
-                                        <td colspan="5" class="text-center text-muted">No recent violations</td>
+                                            <td colspan="4" class="text-center text-muted">No violations recorded</td>
                                     </tr>
                                 </tbody>
                             </table>
                         </div>
                     </div>
                 </div>
+
+                </div>
+
             </div>
 
         </div>
+
     </div>
 
     <!-- Bootstrap 5 JavaScript -->
@@ -201,7 +249,7 @@
     <script>
         // Initialize dashboard on page load
         document.addEventListener('DOMContentLoaded', function() {
-            const dashboard = new EnhancedDashboard();
+            dashboard = new EnhancedDashboard();
             dashboard.init();
         });
     </script>
