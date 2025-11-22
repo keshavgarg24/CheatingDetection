@@ -1,0 +1,15 @@
+{
+  "timestamp": "2025-11-22T12:39:31.218460+00:00",
+  "student_name": "keshav garg",
+  "student_roll": "222",
+  "student_present": "yes",
+  "boundary_violation": "no",
+  "second_face_inside_boundary": "no",
+  "eye_gaze_status": "normal",
+  "head_pose_status": "suspicious",
+  "object_detected": "none",
+  "motion_status": "normal",
+  "soft_score": 0,
+  "strike_count": 0,
+  "decision": "monitoring"
+}

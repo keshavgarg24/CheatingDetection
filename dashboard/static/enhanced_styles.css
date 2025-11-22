@@ -1,0 +1,371 @@
+/**
+ * Enhanced Styles for Exam Monitoring Dashboard
+ * Dark theme with responsive design
+ */
+
+/* Dark Theme Colors */
+:root {
+    --bg-darker: #1a1a1a;
+    --bg-dark: #212529;
+    --bg-secondary: #343a40;
+    --text-light: #f8f9fa;
+    --text-muted: #6c757d;
+    --border-color: #495057;
+}
+
+/* Body and Base Styles */
+body {
+    background-color: var(--bg-dark);
+    color: var(--text-light);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+/* Navigation Bar */
+.navbar.bg-darker {
+    background-color: var(--bg-darker) !important;
+    border-bottom: 1px solid var(--border-color);
+    padding: 1rem 1.5rem;
+}
+
+/* Alert Container */
+.alert-container {
+    position: fixed;
+    top: 70px;
+    right: 20px;
+    z-index: 1050;
+    max-width: 400px;
+    width: 100%;
+}
+
+.alert-container .alert {
+    margin-bottom: 10px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* Cards */
+.card {
+    border: 1px solid var(--border-color);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.card-header {
+    background-color: rgba(0, 0, 0, 0.2);
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* Camera Feed */
+.camera-placeholder {
+    min-height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+}
+
+#camera-feed {
+    border-radius: 4px;
+    max-width: 100%;
+}
+
+/* Student Photo Thumbnails */
+.student-photo {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid var(--border-color);
+}
+
+/* Status Badges */
+.badge {
+    font-size: 0.85rem;
+    padding: 0.35em 0.65em;
+}
+
+/* Tables */
+.table-dark {
+    --bs-table-bg: transparent;
+    --bs-table-striped-bg: rgba(255, 255, 255, 0.05);
+    --bs-table-hover-bg: rgba(255, 255, 255, 0.075);
+    color: var(--text-light);
+}
+
+.table-dark thead th {
+    border-bottom: 2px solid var(--border-color);
+    font-weight: 600;
+}
+
+.table-dark td,
+.table-dark th {
+    border-color: var(--border-color);
+    vertical-align: middle;
+}
+
+/* Action Buttons */
+.btn-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    transition: all 0.2s ease;
+}
+
+.btn:active {
+    transform: translateY(0);
+}
+
+/* Quick Stats Cards */
+.card h2 {
+    font-size: 2.5rem;
+    font-weight: bold;
+}
+
+.card h6 {
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 0.5rem;
+}
+
+/* Chart Containers */
+canvas {
+    max-height: 250px;
+}
+
+/* Scrollbar Styling */
+.table-responsive::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.table-responsive::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+    border-radius: 4px;
+}
+
+.table-responsive::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 4px;
+}
+
+.table-responsive::-webkit-scrollbar-thumb:hover {
+    background: #6c757d;
+}
+
+/* Responsive Design - Tablet */
+@media (max-width: 992px) {
+    .alert-container {
+        max-width: 350px;
+        right: 10px;
+    }
+    
+    .card h2 {
+        font-size: 2rem;
+    }
+    
+    .navbar-brand {
+        font-size: 1rem;
+    }
+}
+
+/* Responsive Design - Mobile */
+@media (max-width: 768px) {
+    .alert-container {
+        max-width: calc(100% - 20px);
+        right: 10px;
+        left: 10px;
+    }
+    
+    .card h2 {
+        font-size: 1.75rem;
+    }
+    
+    .student-photo {
+        width: 30px;
+        height: 30px;
+    }
+    
+    .table-responsive {
+        font-size: 0.875rem;
+    }
+    
+    .btn-sm {
+        padding: 0.2rem 0.4rem;
+        font-size: 0.75rem;
+    }
+    
+    .navbar .d-flex {
+        flex-direction: column;
+        align-items: flex-start !important;
+    }
+    
+    .navbar .d-flex > span {
+        margin-bottom: 0.5rem;
+    }
+    
+    canvas {
+        max-height: 200px;
+    }
+}
+
+/* Responsive Design - Small Mobile */
+@media (max-width: 576px) {
+    .card h2 {
+        font-size: 1.5rem;
+    }
+    
+    .card h6 {
+        font-size: 0.8rem;
+    }
+    
+    .table th,
+    .table td {
+        padding: 0.5rem 0.25rem;
+        font-size: 0.8rem;
+    }
+    
+    .badge {
+        font-size: 0.75rem;
+        padding: 0.25em 0.5em;
+    }
+}
+
+/* Loading States */
+.loading {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+/* Hover Effects for Cards */
+.card:hover {
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+    transition: box-shadow 0.2s ease;
+}
+
+/* Status Indicator Animation */
+#connection-status {
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.7;
+    }
+}
+
+/* Exam Timer Styling */
+#exam-timer {
+    font-family: 'Courier New', monospace;
+    font-size: 1.1rem;
+    letter-spacing: 1px;
+}
+
+/* Table Row Hover Effect */
+.table-hover tbody tr:hover {
+    background-color: rgba(255, 255, 255, 0.1) !important;
+    cursor: pointer;
+}
+
+/* Button Group Spacing */
+.btn + .btn {
+    margin-left: 0.25rem;
+}
+
+/* Card Body Padding */
+.card-body {
+    padding: 1.25rem;
+}
+
+/* Violation Severity Colors */
+.severity-low {
+    color: #17a2b8;
+}
+
+.severity-medium {
+    color: #ffc107;
+}
+
+.severity-high {
+    color: #dc3545;
+}
+
+/* Custom Scrollbar for Webkit Browsers */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-color) var(--bg-secondary);
+}
+
+/* Focus States for Accessibility */
+button:focus,
+.btn:focus {
+    outline: 2px solid #0d6efd;
+    outline-offset: 2px;
+}
+
+/* Disabled State */
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Text Utilities */
+.text-muted {
+    color: var(--text-muted) !important;
+}
+
+/* Border Utilities */
+.border-top {
+    border-top: 1px solid var(--border-color) !important;
+}
+
+.border-bottom {
+    border-bottom: 1px solid var(--border-color) !important;
+}
+
+/* Spacing Utilities */
+.mt-3 {
+    margin-top: 1rem !important;
+}
+
+.mb-3 {
+    margin-bottom: 1rem !important;
+}
+
+/* Print Styles */
+@media print {
+    .navbar,
+    .alert-container,
+    .btn,
+    #camera-feed-container {
+        display: none !important;
+    }
+    
+    body {
+        background-color: white;
+        color: black;
+    }
+    
+    .card {
+        border: 1px solid #000;
+        page-break-inside: avoid;
+    }
+}
